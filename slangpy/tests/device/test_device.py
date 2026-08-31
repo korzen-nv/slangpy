@@ -33,6 +33,18 @@ def test_create_device(device_type: spy.DeviceType):
     assert device.info.api_name == API_NAMES[device_type]
 
 
+@pytest.mark.skipif(
+    spy.DeviceType.d3d12 not in helpers.DEFAULT_DEVICE_TYPES,
+    reason="D3D12 is unavailable on this platform",
+)
+def test_d3d12_native_command_queue_handle():
+    device = helpers.get_device(spy.DeviceType.d3d12)
+    handle = device.get_native_command_queue_handle()
+
+    assert handle.type == spy.NativeHandleType.D3D12CommandQueue
+    assert handle.value != 0
+
+
 @pytest.mark.parametrize("device_type", helpers.DEFAULT_DEVICE_TYPES)
 def test_device_close_handler(device_type: spy.DeviceType):
 

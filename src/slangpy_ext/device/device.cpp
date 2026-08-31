@@ -593,6 +593,12 @@ SGL_PY_EXPORT(device_device)
     device.def_prop_ro("supports_cuda_interop", &Device::supports_cuda_interop, D(Device, supports_cuda_interop));
     device.def_prop_ro("native_handles", &Device::native_handles, D(Device, native_handles));
     device.def(
+        "get_native_command_queue_handle",
+        &Device::get_native_command_queue_handle,
+        "queue"_a = CommandQueueType::graphics,
+        D(Device, get_native_command_queue_handle)
+    );
+    device.def(
         "set_cuda_context_current",
         &Device::set_cuda_context_current,
         "Set the CUDA context current on the calling thread. No-op for non-CUDA devices.\n\n"
