@@ -32,6 +32,7 @@
 #include "sgl/core/error.h"
 #include "sgl/core/window.h"
 #include "sgl/core/string.h"
+#include "sgl/core/platform.h"
 
 #include "sgl/refl/layout.h"
 
@@ -39,6 +40,10 @@
 #include <dxgi.h>
 #include <d3d12.h>
 #include <comdef.h>
+#endif
+
+#if SGL_HAS_VULKAN
+#include <vulkan/vulkan.h>
 #endif
 
 #include <algorithm>
@@ -578,6 +583,35 @@ ref<BufferView> Device::create_buffer_view(Buffer* buffer, BufferViewDesc desc)
 ref<Texture> Device::create_texture(TextureDesc desc)
 {
     return make_ref<Texture>(ref<Device>(this), std::move(desc));
+}
+
+ref<Texture> Device::create_texture_from_native_handle(uint64_t handle, TextureDesc desc)
+{
+    SGL_CHECK(m_desc.type == DeviceType::vulkan, "Native texture wrapping is only supported for Vulkan devices.");
+    SGL_CHECK(handle != 0, "VkImage handle must not be null.");
+    SGL_CHECK(desc.data.empty(), "Native texture wrappers cannot have initial data.");
+
+    rhi::TextureDesc rhi_desc;
+    rhi_desc.type = static_cast<rhi::TextureType>(desc.type);
+    rhi_desc.memoryType = static_cast<rhi::MemoryType>(desc.memory_type);
+    rhi_desc.usage = static_cast<rhi::TextureUsage>(desc.usage);
+    rhi_desc.defaultState = static_cast<rhi::ResourceState>(desc.default_state);
+    rhi_desc.size = {desc.width, desc.height, desc.depth};
+    rhi_desc.arrayLength = desc.array_length;
+    rhi_desc.mipCount = desc.mip_count;
+    rhi_desc.format = static_cast<rhi::Format>(desc.format);
+    rhi_desc.sampleCount = desc.sample_count;
+    rhi_desc.sampleQuality = desc.sample_quality;
+    rhi_desc.sampler = desc.sampler ? desc.sampler->rhi_sampler() : nullptr;
+    rhi_desc.label = desc.label.empty() ? nullptr : desc.label.c_str();
+
+    Slang::ComPtr<rhi::ITexture> resource;
+    SLANG_RHI_CALL(
+        m_rhi_device
+            ->createTextureFromNativeHandle({rhi::NativeHandleType::VkImage, handle}, rhi_desc, resource.writeRef()),
+        this
+    );
+    return create_texture_from_resource(std::move(desc), resource.get());
 }
 
 ref<Texture> Device::create_texture_from_resource(TextureDesc desc, rhi::ITexture* resource)
@@ -1196,6 +1230,62 @@ NativeHandle Device::get_native_command_queue_handle(CommandQueueType queue) con
     rhi::NativeHandle rhi_handle = {};
     SLANG_RHI_CALL(m_rhi_graphics_queue->getNativeHandle(&rhi_handle), this);
     return NativeHandle(rhi_handle);
+}
+
+NativeCommandQueueInfo Device::get_native_command_queue_info() const
+{
+    SGL_CHECK(m_desc.type == DeviceType::vulkan, "Native command queue info is only available for Vulkan devices.");
+#if SGL_HAS_VULKAN
+    const auto handles = native_handles();
+    SGL_CHECK(
+        handles[0].type() == NativeHandleType::VkInstance && handles[1].type() == NativeHandleType::VkPhysicalDevice,
+        "Vulkan native device handles are unavailable."
+    );
+
+#if SGL_WINDOWS
+    const std::filesystem::path loader_name = "vulkan-1.dll";
+#else
+    const std::filesystem::path loader_name = "libvulkan.so.1";
+#endif
+    struct LibraryScope {
+        SharedLibraryHandle handle;
+        ~LibraryScope()
+        {
+            if (handle)
+                platform::release_shared_library(handle);
+        }
+    } library{platform::load_shared_library(loader_name)};
+    SGL_CHECK(library.handle, "Failed to load the Vulkan loader.");
+
+    auto get_instance_proc_addr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+        platform::get_proc_address(library.handle, "vkGetInstanceProcAddr")
+    );
+    SGL_CHECK(get_instance_proc_addr, "Vulkan loader does not expose vkGetInstanceProcAddr.");
+    const auto instance = reinterpret_cast<VkInstance>(handles[0].value());
+    const auto physical_device = reinterpret_cast<VkPhysicalDevice>(handles[1].value());
+    auto get_queue_family_properties = reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(
+        get_instance_proc_addr(instance, "vkGetPhysicalDeviceQueueFamilyProperties")
+    );
+    SGL_CHECK(get_queue_family_properties, "Vulkan queue-family query is unavailable.");
+
+    uint32_t family_count = 0;
+    get_queue_family_properties(physical_device, &family_count, nullptr);
+    std::vector<VkQueueFamilyProperties> families(family_count);
+    get_queue_family_properties(physical_device, &family_count, families.data());
+    constexpr VkQueueFlags required = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
+    for (uint32_t family_index = 0; family_index < family_count; ++family_index) {
+        if ((families[family_index].queueFlags & required) == required) {
+            return {
+                .handle = get_native_command_queue_handle(),
+                .family_index = family_index,
+                .queue_index = 0,
+            };
+        }
+    }
+    SGL_THROW("Vulkan device has no graphics-and-compute command queue family.");
+#else
+    SGL_THROW("SlangPy was built without Vulkan support.");
+#endif
 }
 
 std::vector<AdapterInfo> Device::enumerate_adapters(DeviceType type)

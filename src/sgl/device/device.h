@@ -179,6 +179,12 @@ struct DeviceDesc {
     std::string label;
 };
 
+struct NativeCommandQueueInfo {
+    NativeHandle handle;
+    uint32_t family_index{0};
+    uint32_t queue_index{0};
+};
+
 struct DeviceLimits {
     /// Maximum dimension for 1D textures.
     uint32_t max_texture_dimension_1d;
@@ -420,6 +426,9 @@ public:
      * \return New texture object.
      */
     ref<Texture> create_texture(TextureDesc desc);
+
+    /// Create a non-owning texture wrapper for a Vulkan VkImage.
+    ref<Texture> create_texture_from_native_handle(uint64_t handle, TextureDesc desc);
 
     /// Create a texture from an existing RHI resource.
     ref<Texture> create_texture_from_resource(TextureDesc desc, rhi::ITexture* resource);
@@ -787,6 +796,9 @@ public:
     /// - D3D12: ID3D12CommandQueue*
     /// - Vulkan: VkQueue (Vulkan)
     NativeHandle get_native_command_queue_handle(CommandQueueType queue = CommandQueueType::graphics) const;
+
+    /// Get the Vulkan graphics queue handle and its family and queue indices.
+    NativeCommandQueueInfo get_native_command_queue_info() const;
 
 
     /// Enumerates all available adapters of a given device type.

@@ -2,6 +2,7 @@
 
 import pytest
 import numpy as np
+import gc
 
 import slangpy as spy
 from slangpy.testing import helpers
@@ -43,6 +44,56 @@ def test_d3d12_native_command_queue_handle():
 
     assert handle.type == spy.NativeHandleType.D3D12CommandQueue
     assert handle.value != 0
+
+
+@pytest.mark.skipif(
+    spy.DeviceType.vulkan not in helpers.DEFAULT_DEVICE_TYPES,
+    reason="Vulkan is unavailable on this platform",
+)
+def test_vulkan_native_command_queue_info():
+    device = helpers.get_device(spy.DeviceType.vulkan)
+
+    info = device.get_native_command_queue_info()
+
+    assert info.handle.type == spy.NativeHandleType.VkQueue
+    assert info.handle.value != 0
+    assert info.family_index >= 0
+    assert info.queue_index == 0
+
+
+@pytest.mark.skipif(
+    spy.DeviceType.vulkan not in helpers.DEFAULT_DEVICE_TYPES,
+    reason="Vulkan is unavailable on this platform",
+)
+def test_vulkan_texture_native_handle_wrapper_is_non_owning():
+    device = helpers.get_device(spy.DeviceType.vulkan)
+    original = device.create_texture(
+        type=spy.TextureType.texture_2d,
+        format=spy.Format.rgba8_unorm,
+        width=4,
+        height=4,
+        usage=spy.TextureUsage.render_target,
+        default_state=spy.ResourceState.render_target,
+    )
+    desc = spy.TextureDesc()
+    desc.type = original.type
+    desc.format = original.format
+    desc.width = original.width
+    desc.height = original.height
+    desc.usage = spy.TextureUsage.render_target
+    desc.default_state = spy.ResourceState.render_target
+
+    image_handle = original.native_handle
+    wrapper = device.create_texture_from_native_handle(image_handle.value, desc)
+    assert wrapper.native_handle == image_handle
+
+    del wrapper
+    gc.collect()
+
+    encoder = device.create_command_encoder()
+    encoder.clear_texture_float(original, clear_value=(0.25, 0.5, 0.75, 1.0))
+    device.submit_command_buffer(encoder.finish())
+    device.wait()
 
 
 @pytest.mark.parametrize("device_type", helpers.DEFAULT_DEVICE_TYPES)

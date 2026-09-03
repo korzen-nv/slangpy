@@ -463,6 +463,11 @@ SGL_PY_EXPORT(device_device)
         .def_ro("optix_version", &DeviceInfo::optix_version, D(DeviceInfo, optix_version))
         .def_ro("limits", &DeviceInfo::limits, D(DeviceInfo, limits));
 
+    nb::class_<NativeCommandQueueInfo>(m, "NativeCommandQueueInfo")
+        .def_ro("handle", &NativeCommandQueueInfo::handle)
+        .def_ro("family_index", &NativeCommandQueueInfo::family_index)
+        .def_ro("queue_index", &NativeCommandQueueInfo::queue_index);
+
     nb::class_<ShaderCacheStats>(m, "ShaderCacheStats", D(ShaderCacheStats))
         .def_ro("entry_count", &ShaderCacheStats::entry_count, D(ShaderCacheStats, entry_count))
         .def_ro("hit_count", &ShaderCacheStats::hit_count, D(ShaderCacheStats, hit_count))
@@ -593,10 +598,22 @@ SGL_PY_EXPORT(device_device)
     device.def_prop_ro("supports_cuda_interop", &Device::supports_cuda_interop, D(Device, supports_cuda_interop));
     device.def_prop_ro("native_handles", &Device::native_handles, D(Device, native_handles));
     device.def(
+        "create_texture_from_native_handle",
+        &Device::create_texture_from_native_handle,
+        "handle"_a,
+        "desc"_a,
+        "Create a non-owning texture wrapper for a Vulkan VkImage."
+    );
+    device.def(
         "get_native_command_queue_handle",
         &Device::get_native_command_queue_handle,
         "queue"_a = CommandQueueType::graphics,
         D(Device, get_native_command_queue_handle)
+    );
+    device.def(
+        "get_native_command_queue_info",
+        &Device::get_native_command_queue_info,
+        "Return the Vulkan graphics queue handle, family index, and queue index."
     );
     device.def(
         "set_cuda_context_current",
